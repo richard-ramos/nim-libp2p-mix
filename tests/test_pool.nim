@@ -45,6 +45,18 @@ suite "MixNodePool Tests":
       peerStore[KeyBook][pubInfo.peerId].scheme == Secp256k1
       peerStore[KeyBook][pubInfo.peerId].skkey == pubInfo.libp2pPubKey
 
+  test "exit capability follows the shared peer store":
+    var info = mixNodes[0].toMixPubInfo()
+    info.exitEnabled = false
+    pool.add(info)
+    let otherPool = MixNodePool.new(peerStore)
+    check not otherPool.get(info.peerId).get().exitEnabled
+    info.exitEnabled = true
+    otherPool.add(info)
+    check pool.get(info.peerId).get().exitEnabled
+    discard otherPool.remove(info.peerId)
+    check pool.get(info.peerId).isNone
+
   test "bulk add stores multiple mix nodes":
     let pubInfos = mixNodes.mapIt(it.toMixPubInfo())
 

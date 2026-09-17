@@ -441,7 +441,7 @@ method stop*(ct: ConstantRateCoverTraffic) {.async: (raises: []).} =
 proc setCoverRateFraction*(
     ct: ConstantRateCoverTraffic, coverRateFraction: float
 ): Future[Result[void, string]] {.async: (raises: [CancelledError]).} =
-  if coverRateFraction <= 0.0 or coverRateFraction > 1.0:
+  if not (coverRateFraction > 0.0 and coverRateFraction <= 1.0):
     return err("coverRateFraction (f) must be in (0.0, 1.0]")
 
   let wasRunning = ct.running

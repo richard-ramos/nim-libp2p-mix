@@ -202,7 +202,8 @@ suite "ConstantRateCoverTraffic":
     let ct = ConstantRateCoverTraffic.new(
       totalSlots = 10, epochDuration = 10.seconds, coverRateFraction = 0.5
     )
-    check (await ct.setCoverRateFraction(0.0)).isErr
+    for rate in [0.0, -1.0, 1.1, NaN, Inf, NegInf]:
+      check (await ct.setCoverRateFraction(rate)).isErr
     check:
       ct.coverRateFraction == 0.5
       ct.emissionInterval == 8.seconds
