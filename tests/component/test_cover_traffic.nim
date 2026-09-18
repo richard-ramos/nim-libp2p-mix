@@ -27,7 +27,7 @@ suite "Cover Traffic - Integration":
     startAndDeferStop(nodes)
 
     let node = nodes[0]
-    let buildRes = node.buildCoverPacket()
+    let buildRes = await node.buildCoverPacket()
     check buildRes.isOk
     let built = buildRes.get()
 
@@ -49,8 +49,10 @@ suite "Cover Traffic - Integration":
     )
 
     ct.setCoverPacketBuilder(
-      proc(): Result[CoverPacketBuild, string] {.gcsafe, raises: [].} =
-        nodes[0].buildCoverPacket()
+      proc(): Future[Result[CoverPacketBuild, string]] {.
+          async: (raises: [CancelledError])
+      .} =
+        return await nodes[0].buildCoverPacket()
     )
     ct.setCoverPacketSender(
       proc(

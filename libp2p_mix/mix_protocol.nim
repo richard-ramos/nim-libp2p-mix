@@ -141,7 +141,9 @@ proc writeLp(
 
 proc generateAndAppendProof(
     mixProto: MixProtocol, packet: seq[byte], label: string
-): Result[tuple[packet: seq[byte], proofToken: seq[byte]], string] =
+): Future[Result[tuple[packet: seq[byte], proofToken: seq[byte]], string]] {.
+    async: (raises: [CancelledError])
+.} =
   ## Generate spam protection proof and append it to the packet.
   ## Returns the packet with proof appended and an opaque proof token
   ## for proof slot tracking.
@@ -149,14 +151,15 @@ proc generateAndAppendProof(
     return ok((packet, newSeq[byte]()))
 
   let bindingData = packet
-  let proofResult = spamProtection
-    .generateProof(bindingData)
-    .mapErr(
-      proc(e: string): string =
-        mix_messages_error.inc(labelValues = [label, "SPAM_PROOF_GEN_FAILED"])
-        fmt"Failed to generate spam protection proof: {e}"
-    ).valueOr:
-      return err(error)
+  let proofResult = (await spamProtection.generateProofAsync(bindingData)).mapErr(
+    proc(e: string): string =
+      mix_messages_error.inc(labelValues = [label, "SPAM_PROOF_GEN_FAILED"])
+      fmt"Failed to generate spam protection proof: {e}"
+  ).valueOr:
+    return err(error)
+
+  if proofResult.proof.len != spamProtection.proofSize:
+    return err("Spam protection provider returned an invalid proof size")
 
   let packetWithProof = appendProofToPacket(packet, proofResult.proof)
     .mapErr(
@@ -166,7 +169,7 @@ proc generateAndAppendProof(
     ).valueOr:
       return err(error)
 
-  ok((packetWithProof, proofResult.token))
+  return ok((packetWithProof, proofResult.token))
 
 proc extractProof(
     mixProto: MixProtocol, packetWithProof: var seq[byte], label: string
@@ -189,14 +192,14 @@ proc extractProof(
 
 proc verifyProof(
     mixProto: MixProtocol, sphinxPacket: seq[byte], proof: seq[byte], label: string
-): Result[void, string] =
+): Future[Result[void, string]] {.async: (raises: [CancelledError]).} =
   ## Verify a previously extracted spam protection proof.
   let spamProtection = mixProto.spamProtection.valueOr:
     return ok()
 
   let bindingData = sphinxPacket
 
-  let verifyResult = spamProtection.verifyProof(proof, bindingData).valueOr:
+  let verifyResult = (await spamProtection.verifyProofAsync(proof, bindingData)).valueOr:
     mix_messages_error.inc(labelValues = [label, "SPAM_PROOF_VERIFY_ERROR"])
     return err(fmt"Spam protection proof verification error: {error}")
 
@@ -205,7 +208,7 @@ proc verifyProof(
     return err("Spam protection proof verification failed")
 
   trace "Spam protection proof verified successfully"
-  ok()
+  return ok()
 
 method handleMixMessages*(
     mixProto: MixProtocol,
@@ -251,7 +254,7 @@ method handleMixMessages*(
 
   # Step 3: Verify spam proof
   # Only done after replay check passes to avoid wasting cycles on duplicates
-  mixProto.verifyProof(sphinxBytes, spamProof, "Intermediate/Exit").isOkOr:
+  (await mixProto.verifyProof(sphinxBytes, spamProof, "Intermediate/Exit")).isOkOr:
     error "Spam protection verification failed", err = error
     return
 
@@ -408,15 +411,17 @@ method handleMixMessages*(
     var proofGenTimeMs: int64
     let proofGenFut = (
       proc(): Future[Result[tuple[packet: seq[byte], proofToken: seq[byte]], string]] {.
-          async
+          async: (raises: [CancelledError])
       .} =
-        let res = mixProto.generateAndAppendProof(
+        let res = await mixProto.generateAndAppendProof(
           processedSP.serializedSphinxPacket, "Intermediate"
         )
         proofGenTimeMs = (Moment.now() - proofGenStartTime).milliseconds
         return res
     )()
 
+    defer:
+      await cancelAndWait(proofGenFut, delayFut)
     await allFutures(proofGenFut, delayFut)
 
     mixProto.spamProtection.withValue(sp):
@@ -426,7 +431,7 @@ method handleMixMessages*(
           sampledDelay = actualDelay,
           hint = "Increase the minimum delay floor or reduce proof generation time"
 
-    let (outgoingPacket, _) = proofGenFut.value().valueOr:
+    let (outgoingPacket, _) = (await proofGenFut).valueOr:
       error "Failed to generate spam protection proof for next hop", err = error
       return
 
@@ -659,13 +664,15 @@ proc sendPacket(
   var proofGenTimeMs: int64
   let proofGenFut = (
     proc(): Future[Result[tuple[packet: seq[byte], proofToken: seq[byte]], string]] {.
-        async
+        async: (raises: [CancelledError])
     .} =
-      let res = mixProto.generateAndAppendProof(serialized, label)
+      let res = await mixProto.generateAndAppendProof(serialized, label)
       proofGenTimeMs = (Moment.now() - proofGenStartTime).milliseconds
       return res
   )()
 
+  defer:
+    await cancelAndWait(proofGenFut, delayFut)
   await allFutures(proofGenFut, delayFut)
 
   mixProto.spamProtection.withValue(sp):
@@ -675,7 +682,7 @@ proc sendPacket(
         sampledDelay = initialDelay,
         hint = "Increase the minimum delay floor or reduce proof generation time"
 
-  let (packetToSend, _) = proofGenFut.value().valueOr:
+  let (packetToSend, _) = (await proofGenFut).valueOr:
     return err(error)
 
   when defined(enable_mix_benchmarks):
@@ -916,7 +923,7 @@ proc sendSurbReply*(
 
 proc buildCoverPacket*(
     mixProto: MixProtocol
-): Result[CoverPacketBuild, string] {.raises: [].} =
+): Future[Result[CoverPacketBuild, string]] {.async: (raises: [CancelledError]).} =
   ## Build a cover Sphinx packet with a loop path (self = exit node),
   ## random payload .
   let nodes = mixProto.selectRandomNodes(
@@ -956,13 +963,17 @@ proc buildCoverPacket*(
   let sphinxPacket = wrapInSphinxPacket(message, publicKeys, delays, hops, Hop()).valueOr:
     return err("Failed to wrap cover sphinx packet: " & error)
 
-  let (packetToSend, proofToken) = mixProto.generateAndAppendProof(
-    sphinxPacket.serialize(), "Cover"
-  ).valueOr:
-    return err("Failed to generate proof for cover packet: " & error)
+  let serialized = sphinxPacket.serialize()
+  let (packetToSend, proofToken) =
+    if mixProto.spamProtection.isSome() and
+        not mixProto.spamProtection.get().precomputeCoverProofs():
+      (serialized, newSeq[byte]())
+    else:
+      (await mixProto.generateAndAppendProof(serialized, "Cover")).valueOr:
+        return err("Failed to generate proof for cover packet: " & error)
 
   let firstNode = nodes[0]
-  ok(
+  return ok(
     CoverPacketBuild(
       packet: packetToSend,
       firstHopPeerId: firstNode.peerId,
@@ -974,8 +985,15 @@ proc buildCoverPacket*(
 proc sendCoverPacket*(
     mixProto: MixProtocol, peerId: PeerId, multiAddr: MultiAddress, packet: seq[byte]
 ): Future[Result[void, string]] {.async: (raises: [CancelledError]).} =
+  let packetToSend =
+    if mixProto.spamProtection.isSome() and
+        not mixProto.spamProtection.get().precomputeCoverProofs():
+      (await mixProto.generateAndAppendProof(packet, "Cover")).valueOr:
+        return err(error)
+    else:
+      (packet, newSeq[byte]())
   try:
-    await mixProto.writeLp(peerId, @[multiAddr], @[MixProtocolID], packet)
+    await mixProto.writeLp(peerId, @[multiAddr], @[MixProtocolID], packetToSend[0])
     mix_messages_forwarded.inc(labelValues = ["Cover"])
     return ok()
   except DialFailedError as exc:
@@ -1067,8 +1085,10 @@ proc init*(
   mixProto.coverTraffic = coverTraffic
   coverTraffic.withValue(ct):
     ct.setCoverPacketBuilder(
-      proc(): Result[CoverPacketBuild, string] {.gcsafe, raises: [].} =
-        mixProto.buildCoverPacket()
+      proc(): Future[Result[CoverPacketBuild, string]] {.
+          async: (raises: [CancelledError])
+      .} =
+        return await mixProto.buildCoverPacket()
     )
     ct.setCoverPacketSender(
       proc(

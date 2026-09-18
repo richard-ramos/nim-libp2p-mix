@@ -6,7 +6,7 @@
 ##
 ## Uses per-hop proof generation where each node generates fresh proofs for the next hop.
 
-import results
+import chronos, results
 
 type
   EpochChangeCallback* = proc(epoch: uint64) {.gcsafe, raises: [].}
@@ -48,6 +48,16 @@ method generateProof*(
   ## Note: This base implementation should be overridden by concrete types.
   raiseAssert "generateProof must be implemented by concrete spam protection types"
 
+method generateProofAsync*(
+    self: SpamProtection, bindingData: seq[byte]
+): Future[Result[ProofResult, string]] {.base, async: (raises: [CancelledError]).} =
+  ## External proof providers may suspend without blocking the Mix event loop.
+  return self.generateProof(bindingData)
+
+method precomputeCoverProofs*(self: SpamProtection): bool {.base, gcsafe, raises: [].} =
+  ## Providers with durable, non-reclaimable allocations prove at transmission.
+  true
+
 method reclaimProofToken*(
     self: SpamProtection, token: seq[byte]
 ) {.base, gcsafe, raises: [].} =
@@ -86,6 +96,11 @@ method verifyProof*(
   ##
   ## Note: This base implementation should be overridden by concrete types.
   raiseAssert "verifyProof must be implemented by concrete spam protection types"
+
+method verifyProofAsync*(
+    self: SpamProtection, encodedProofData: seq[byte], bindingData: seq[byte]
+): Future[Result[bool, string]] {.base, async: (raises: [CancelledError]).} =
+  return self.verifyProof(encodedProofData, bindingData)
 
 method registerOnEpochChange*(
     self: SpamProtection, cb: EpochChangeCallback

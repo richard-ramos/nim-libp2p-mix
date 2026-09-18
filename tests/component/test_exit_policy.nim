@@ -129,7 +129,7 @@ proc exitPolicy(allowExit: bool) {.async.} =
   doAssert external.received == (if allowExit: 1 else: 0)
 
   # Every other node is intermediate-only, and the loop endpoint may be too.
-  let packet = protos[4].buildCoverPacket().expect("build cover loop")
+  let packet = (await protos[4].buildCoverPacket()).expect("build cover loop")
   (
     await protos[4].sendCoverPacket(
       packet.firstHopPeerId, packet.firstHopAddr, packet.packet

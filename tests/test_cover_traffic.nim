@@ -19,8 +19,10 @@ proc makePeerInfo(): (PeerId, MultiAddress) =
 
 proc mockBuildCoverPacket(): BuildCoverPacketProc =
   let (pid, ma) = makePeerInfo()
-  return proc(): Result[CoverPacketBuild, string] {.gcsafe, raises: [].} =
-    ok(
+  return proc(): Future[Result[CoverPacketBuild, string]] {.
+      async: (raises: [CancelledError])
+  .} =
+    return ok(
       CoverPacketBuild(
         packet: newSeq[byte](PacketSize),
         firstHopPeerId: pid,
@@ -30,8 +32,10 @@ proc mockBuildCoverPacket(): BuildCoverPacketProc =
     )
 
 proc mockBuildCoverPacketFailing(): BuildCoverPacketProc =
-  return proc(): Result[CoverPacketBuild, string] {.gcsafe, raises: [].} =
-    err("mock build failure")
+  return proc(): Future[Result[CoverPacketBuild, string]] {.
+      async: (raises: [CancelledError])
+  .} =
+    return err("mock build failure")
 
 proc mockSendCoverPacket(sentPackets: ref seq[seq[byte]]): SendCoverPacketProc =
   return proc(
