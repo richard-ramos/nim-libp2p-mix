@@ -54,7 +54,6 @@ proc generateRandomMany*(
   nodeInfos
 
 type MixPubInfo* = object
-  exitEnabled*: bool
   peerId*: PeerId
   multiAddr*: MultiAddress
   mixPubKey*: FieldElement
@@ -66,10 +65,8 @@ proc init*(
     multiAddr: MultiAddress,
     mixPubKey: FieldElement,
     libp2pPubKey: SkPublicKey,
-    exitEnabled: bool = true,
 ): T =
   T(
-    exitEnabled: exitEnabled,
     peerId: peerId,
     multiAddr: multiAddr,
     mixPubKey: mixPubKey,

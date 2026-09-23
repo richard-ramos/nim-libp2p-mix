@@ -11,7 +11,7 @@ import libp2p/protocols/protocol
 import libp2p/stream/connection
 import libp2p_mix
 import libp2p_mix/[mix_protocol, cover_traffic]
-import ../tools/unittest
+import ../tools/[crypto, unittest]
 
 type
   Counter = ref object
@@ -68,22 +68,23 @@ proc send(proto: MixProtocol, dest: MixDestination): Future[bool] {.async.} =
     return false
 
 proc exitPolicy(allowExit: bool) {.async.} =
-  let rng = newRng()
-  var infos = MixNodeInfo.generateRandomMany(5, rng)
+  let testRng = rng()
+  var infos = MixNodeInfo.generateRandomMany(5, testRng)
   var switches: seq[Switch]
   var protos: seq[MixProtocol]
   let cover = CoverCounter(slotPool: SlotPool.new(100))
   let local = Counter()
   let external = Counter()
   for i in 0 ..< infos.len:
-    let sw = makeSwitch(infos[i], rng)
+    let sw = makeSwitch(infos[i], testRng)
     let ct =
       if i == 4:
         Opt.some(CoverTraffic(cover))
       else:
         Opt.none(CoverTraffic)
-    let proto =
-      MixProtocol.new(infos[i], sw, allowExit = i == 4 and allowExit, coverTraffic = ct)
+    let proto = MixProtocol.new(
+      infos[i], sw, allowExit = allowExit, coverTraffic = ct
+    )
     sw.mount(proto)
     if i == 4:
       sw.mount(receiver(local))
@@ -91,7 +92,7 @@ proc exitPolicy(allowExit: bool) {.async.} =
     protos.add(proto)
   defer:
     await switches.mapIt(it.stop()).allFutures()
-  let dest = makeSwitch(MixNodeInfo.generateRandom(0, rng), rng)
+  let dest = makeSwitch(MixNodeInfo.generateRandom(0, testRng), testRng)
   dest.mount(receiver(external))
   defer:
     await dest.stop()
@@ -104,27 +105,19 @@ proc exitPolicy(allowExit: bool) {.async.} =
     for j in 0 ..< infos.len:
       if i == j:
         continue
-      var info = infos[j].toMixPubInfo()
-      info.exitEnabled = j == 4 and allowExit
-      protos[i].nodePool.add(info)
+      protos[i].nodePool.add(infos[j].toMixPubInfo())
 
   let localDest = MixDestination.exitNode(infos[4].peerId)
   let externalDest =
     MixDestination.forwardToAddr(dest.peerInfo.peerId, dest.peerInfo.addrs[0])
-  if not allowExit:
-    doAssert not await send(protos[0], localDest)
-    doAssert not await send(protos[0], externalDest)
-    # A stale or forged advertisement must not bypass the receiving node's policy.
-    var advertised = infos[4].toMixPubInfo()
-    advertised.exitEnabled = true
-    protos[0].nodePool.add(advertised)
-
   doAssert await send(protos[0], localDest)
   doAssert await send(protos[0], externalDest)
-  for attempt in 0 ..< 100:
-    if allowExit and local.received == 1 and external.received == 1:
-      break
-    await sleepAsync(20.milliseconds)
+  if allowExit:
+    checkUntilTimeout:
+      local.received == 1
+      external.received == 1
+  else:
+    await sleepAsync(100.milliseconds)
   doAssert local.received == (if allowExit: 1 else: 0)
   doAssert external.received == (if allowExit: 1 else: 0)
 
@@ -135,15 +128,12 @@ proc exitPolicy(allowExit: bool) {.async.} =
       packet.firstHopPeerId, packet.firstHopAddr, packet.packet
     )
   ).expect("send cover loop")
-  for attempt in 0 ..< 100:
-    if cover.received == 1:
-      break
-    await sleepAsync(20.milliseconds)
-  doAssert cover.received == 1
+  checkUntilTimeout:
+    cover.received == 1
   echo "PASS: exit policy allowExit=", allowExit, "; cover loop received"
 
 suite "Exit role policy":
   asyncTest "intermediates reject application exits but consume cover loops":
     await exitPolicy(false)
-  asyncTest "opted-in exits deliver locally and externally":
+  asyncTest "opted-in nodes deliver locally and externally":
     await exitPolicy(true)

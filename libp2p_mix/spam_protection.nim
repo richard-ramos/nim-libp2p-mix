@@ -54,6 +54,13 @@ method generateProofAsync*(
   ## External proof providers may suspend without blocking the Mix event loop.
   return self.generateProof(bindingData)
 
+method generateProofAsync*(
+    self: SpamProtection, bindingData: seq[byte], epoch: uint64
+): Future[Result[ProofResult, string]] {.base, async: (raises: [CancelledError]).} =
+  ## Epoch-aware proof providers should override this method. The default keeps
+  ## existing providers compatible when their proofs do not bind an epoch.
+  return await self.generateProofAsync(bindingData)
+
 method precomputeCoverProofs*(self: SpamProtection): bool {.base, gcsafe, raises: [].} =
   ## Providers with durable, non-reclaimable allocations prove at transmission.
   true

@@ -24,8 +24,6 @@ type MixPubKeyBook* = ref object of PeerBook[Curve25519Key]
   ## package owns its peer-store extension and libp2p core stays free of
   ## mix-specific types.
 
-type MixExitBook = ref object of PeerBook[bool]
-
 func isSupportedMultiaddr(maddr: MultiAddress): bool =
   ## Returns true if the multiaddress is supported by the mix protocol.
   ## Mix protocol supports IPv4 addresses with TCP or QUIC-v1 transports,
@@ -61,7 +59,6 @@ proc add*(pool: MixNodePool, info: MixPubInfo) =
   ## Address is added to AddressBook if not already present.
   ## KeyBook is only set if not already present (to avoid overwriting
   ## keys set by the Identify protocol).
-  pool.peerStore[MixExitBook][info.peerId] = info.exitEnabled
   pool.peerStore[MixPubKeyBook][info.peerId] = info.mixPubKey
 
   # Add address if not already present.
@@ -86,7 +83,6 @@ proc add*(pool: MixNodePool, infos: seq[MixPubInfo]) =
 
 proc remove*(pool: MixNodePool, peerId: PeerId): bool =
   ## Remove a mix node from the pool. Returns true if the node was present.
-  discard pool.peerStore[MixExitBook].del(peerId)
   pool.peerStore[MixPubKeyBook].del(peerId)
   # Preserve AddressBook/KeyBook entries used by other protocols.
 
@@ -111,15 +107,7 @@ proc get*(pool: MixNodePool, peerId: PeerId): Opt[MixPubInfo] =
   if pubKey.scheme != Secp256k1:
     return Opt.none(MixPubInfo)
 
-  Opt.some(
-    MixPubInfo.init(
-      peerId,
-      supportedAddr,
-      mixPubKey,
-      pubKey.skkey,
-      pool.peerStore[MixExitBook][peerId],
-    )
-  )
+  Opt.some(MixPubInfo.init(peerId, supportedAddr, mixPubKey, pubKey.skkey))
 
 proc peerIds*(pool: MixNodePool): seq[PeerId] =
   ## Get all peer IDs in the mix node pool.
