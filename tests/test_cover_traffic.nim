@@ -19,9 +19,9 @@ proc makePeerInfo(): (PeerId, MultiAddress) =
 
 proc mockBuildCoverPacket(): BuildCoverPacketProc =
   let (pid, ma) = makePeerInfo()
-  return proc(epoch: uint64): Future[Result[CoverPacketBuild, string]] {.
-      async: (raises: [CancelledError])
-  .} =
+  return proc(
+      epoch: uint64
+  ): Future[Result[CoverPacketBuild, string]] {.async: (raises: [CancelledError]).} =
     return ok(
       CoverPacketBuild(
         packet: newSeq[byte](PacketSize),
@@ -32,9 +32,9 @@ proc mockBuildCoverPacket(): BuildCoverPacketProc =
     )
 
 proc mockBuildCoverPacketFailing(): BuildCoverPacketProc =
-  return proc(epoch: uint64): Future[Result[CoverPacketBuild, string]] {.
-      async: (raises: [CancelledError])
-  .} =
+  return proc(
+      epoch: uint64
+  ): Future[Result[CoverPacketBuild, string]] {.async: (raises: [CancelledError]).} =
     return err("mock build failure")
 
 proc mockSendCoverPacket(sentPackets: ref seq[seq[byte]]): SendCoverPacketProc =
@@ -286,9 +286,9 @@ suite "ConstantRateCoverTraffic":
     let (pid, ma) = makePeerInfo()
     let ct = ConstantRateCoverTraffic.new(totalSlots = 10, epochDuration = 1.seconds)
     ct.setCoverPacketBuilder(
-      proc(epoch: uint64): Future[Result[CoverPacketBuild, string]] {.
-          async: (raises: [CancelledError])
-      .} =
+      proc(
+          epoch: uint64
+      ): Future[Result[CoverPacketBuild, string]] {.async: (raises: [CancelledError]).} =
         await sleepAsync(80.milliseconds)
         return ok(
           CoverPacketBuild(

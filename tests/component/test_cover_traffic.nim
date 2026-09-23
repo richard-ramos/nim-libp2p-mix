@@ -49,18 +49,17 @@ suite "Cover Traffic - Integration":
     )
 
     ct.setCoverPacketBuilder(
-      proc(epoch: uint64): Future[Result[CoverPacketBuild, string]] {.
-          async: (raises: [CancelledError])
-      .} =
+      proc(
+          epoch: uint64
+      ): Future[Result[CoverPacketBuild, string]] {.async: (raises: [CancelledError]).} =
         return await nodes[0].buildCoverPacket(epoch)
     )
     ct.setCoverPacketSender(
       proc(
           peerId: PeerId, multiAddr: MultiAddress, packet: seq[byte], epoch: uint64
       ): Future[Result[void, string]] {.async: (raises: [CancelledError]).} =
-        return await nodes[0].sendCoverPacket(
-          peerId, multiAddr, packet, Opt.some(epoch)
-        )
+        return
+          await nodes[0].sendCoverPacket(peerId, multiAddr, packet, Opt.some(epoch))
     )
     ct.onEpochChange(1)
 

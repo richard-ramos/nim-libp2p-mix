@@ -299,10 +299,9 @@ proc buildAndSendOnDemand(
     return
 
   let built = buildRes.get()
-  let sendRes =
-    await ct.sendPacket(
-      built.firstHopPeerId, built.firstHopAddr, built.packet, claimEpoch
-    )
+  let sendRes = await ct.sendPacket(
+    built.firstHopPeerId, built.firstHopAddr, built.packet, claimEpoch
+  )
   if sendRes.isErr:
     debug "Failed to send cover packet", err = sendRes.error
     mix_cover_error.inc(labelValues = ["SEND_FAILED"])
@@ -350,10 +349,9 @@ proc buildOnDemandOverlapped(
     return
 
   let built = builtRes.get()
-  let sendRes =
-    await ct.sendPacket(
-      built.firstHopPeerId, built.firstHopAddr, built.packet, claimEpoch
-    )
+  let sendRes = await ct.sendPacket(
+    built.firstHopPeerId, built.firstHopAddr, built.packet, claimEpoch
+  )
   if sendRes.isErr:
     debug "Failed to send cover packet", err = sendRes.error
     mix_cover_error.inc(labelValues = ["SEND_FAILED"])
@@ -393,10 +391,9 @@ proc emitCoverPacket*(
         await ct.buildAndSendOnDemand(claimEpoch)
         return
       else:
-        let sendRes =
-          await ct.sendPacket(
-            pkt.firstHopPeerId, pkt.firstHopAddr, pkt.packet, claimEpoch
-          )
+        let sendRes = await ct.sendPacket(
+          pkt.firstHopPeerId, pkt.firstHopAddr, pkt.packet, claimEpoch
+        )
         if sendRes.isErr:
           debug "Failed to send pre-built cover packet", err = sendRes.error
           mix_cover_error.inc(labelValues = ["SEND_FAILED"])

@@ -82,9 +82,7 @@ proc exitPolicy(allowExit: bool) {.async.} =
         Opt.some(CoverTraffic(cover))
       else:
         Opt.none(CoverTraffic)
-    let proto = MixProtocol.new(
-      infos[i], sw, allowExit = allowExit, coverTraffic = ct
-    )
+    let proto = MixProtocol.new(infos[i], sw, allowExit = allowExit, coverTraffic = ct)
     sw.mount(proto)
     if i == 4:
       sw.mount(receiver(local))

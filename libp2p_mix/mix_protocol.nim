@@ -965,8 +965,8 @@ proc selectRandomNodes(
   let available = mixProto.nodePool.peerIds().filterIt(it notin excludePeerIds)
   if available.len < count:
     return err(
-      "Not enough mix nodes in pool (available=" & $available.len & ", needed=" &
-        $count & ")"
+      "Not enough mix nodes in pool (available=" & $available.len & ", needed=" & $count &
+        ")"
     )
 
   let selectedPeerIds = mixProto.rng.pick(available, count).valueOr:
@@ -1033,11 +1033,7 @@ proc buildCoverPacket*(
         not mixProto.spamProtection.get().precomputeCoverProofs():
       (serialized, newSeq[byte]())
     else:
-      (
-        await mixProto.generateAndAppendProof(
-          serialized, "Cover", Opt.some(epoch)
-        )
-      ).valueOr:
+      (await mixProto.generateAndAppendProof(serialized, "Cover", Opt.some(epoch))).valueOr:
         return err("Failed to generate proof for cover packet: " & error)
 
   let firstNode = nodes[0]
@@ -1165,18 +1161,16 @@ proc init*(
   mixProto.coverTraffic = coverTraffic
   coverTraffic.withValue(ct):
     ct.setCoverPacketBuilder(
-      proc(epoch: uint64): Future[Result[CoverPacketBuild, string]] {.
-          async: (raises: [CancelledError])
-      .} =
+      proc(
+          epoch: uint64
+      ): Future[Result[CoverPacketBuild, string]] {.async: (raises: [CancelledError]).} =
         return await mixProto.buildCoverPacket(epoch)
     )
     ct.setCoverPacketSender(
       proc(
           peerId: PeerId, multiAddr: MultiAddress, packet: seq[byte], epoch: uint64
       ): Future[Result[void, string]] {.async: (raises: [CancelledError]).} =
-        await mixProto.sendCoverPacket(
-          peerId, multiAddr, packet, Opt.some(epoch)
-        )
+        await mixProto.sendCoverPacket(peerId, multiAddr, packet, Opt.some(epoch))
     )
     ct.setSendDelaySampler(
       proc(): Delay {.gcsafe, raises: [].} =
