@@ -45,7 +45,6 @@ type MixProtocol* = ref object of LPProtocol
   nodePool*: MixNodePool
   tagManager: TagManager
   exitLayer: ExitLayer
-  allowExit: bool
   rng: Rng
   surbStore: SurbStore
     ## Reply credentials for SURBs this node has issued. Expires entries whose
@@ -304,12 +303,6 @@ method handleMixMessages*(
       mix_cover_received.inc()
       mixProto.coverTraffic.withValue(ct):
         ct.onCoverReceived()
-      return
-
-    # Cover loops terminate above even when application exit delivery is disabled.
-    if not mixProto.allowExit:
-      trace "Application exit delivery disabled", peerId = mixProto.mixNodeInfo.peerId
-      mix_messages_error.inc(labelValues = ["Exit", "EXIT_DISABLED"])
       return
 
     let (surbs, message) = extractSURBs(deserialized.message).valueOr:
@@ -1112,7 +1105,6 @@ proc init*(
     delayStrategy: Opt[DelayStrategy] = Opt.none(DelayStrategy),
     coverTraffic: Opt[CoverTraffic] = Opt.none(CoverTraffic),
     surbStore: SurbStore = nil,
-    allowExit: bool = true,
 ) {.raises: [].} =
   ## Initialize a MixProtocol instance.
   ##
@@ -1142,7 +1134,6 @@ proc init*(
   doAssert store.ttl <= tagManager.tagTTL,
     "SURB credential TTL must not exceed the replay tag TTL"
 
-  mixProto.allowExit = allowExit
   mixProto.mixNodeInfo = mixNodeInfo
   mixProto.switch = switch
   mixProto.rng = switch.rng
@@ -1224,10 +1215,8 @@ proc new*(
     delayStrategy: Opt[DelayStrategy] = Opt.none(DelayStrategy),
     coverTraffic: Opt[CoverTraffic] = Opt.none(CoverTraffic),
     surbStore: SurbStore = nil,
-    allowExit: bool = true,
 ): T {.raises: [].} =
   ## Create a new MixProtocol instance.
-  ## `allowExit = false` drops application exit traffic but still accepts cover loops.
   ##
   ## Mix node public keys should be populated via the nodePool after
   ## creation using `mixProto.nodePool.add(mixPubInfo)`.
@@ -1238,6 +1227,6 @@ proc new*(
   let mixProto = new(T)
   mixProto.init(
     mixNodeInfo, switch, tagManager, spamProtection, delayStrategy, coverTraffic,
-    surbStore, allowExit,
+    surbStore,
   )
   mixProto

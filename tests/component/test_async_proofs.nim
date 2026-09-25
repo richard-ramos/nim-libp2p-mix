@@ -54,7 +54,6 @@ suite "Asynchronous proof provider":
         sw,
         spamProtection = Opt.some(SpamProtection(provider)),
         delayStrategy = Opt.some(DelayStrategy(NoSamplingDelayStrategy.new(rng()))),
-        allowExit = false,
       )
       for other in infos:
         if other.peerId != info.peerId:

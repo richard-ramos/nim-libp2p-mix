@@ -67,7 +67,7 @@ proc send(proto: MixProtocol, dest: MixDestination): Future[bool] {.async.} =
   except LPStreamError:
     return false
 
-proc exitPolicy(allowExit: bool) {.async.} =
+proc defaultExitDelivery() {.async.} =
   let testRng = rng()
   var infos = MixNodeInfo.generateRandomMany(5, testRng)
   var switches: seq[Switch]
@@ -82,7 +82,7 @@ proc exitPolicy(allowExit: bool) {.async.} =
         Opt.some(CoverTraffic(cover))
       else:
         Opt.none(CoverTraffic)
-    let proto = MixProtocol.new(infos[i], sw, allowExit = allowExit, coverTraffic = ct)
+    let proto = MixProtocol.new(infos[i], sw, coverTraffic = ct)
     sw.mount(proto)
     if i == 4:
       sw.mount(receiver(local))
@@ -110,16 +110,12 @@ proc exitPolicy(allowExit: bool) {.async.} =
     MixDestination.forwardToAddr(dest.peerInfo.peerId, dest.peerInfo.addrs[0])
   doAssert await send(protos[0], localDest)
   doAssert await send(protos[0], externalDest)
-  if allowExit:
-    checkUntilTimeout:
-      local.received == 1
-      external.received == 1
-  else:
-    await sleepAsync(100.milliseconds)
-  doAssert local.received == (if allowExit: 1 else: 0)
-  doAssert external.received == (if allowExit: 1 else: 0)
+  checkUntilTimeout:
+    local.received == 1
+    external.received == 1
+  doAssert local.received == 1
+  doAssert external.received == 1
 
-  # Every other node is intermediate-only, and the loop endpoint may be too.
   let packet = (await protos[4].buildCoverPacket()).expect("build cover loop")
   (
     await protos[4].sendCoverPacket(
@@ -128,10 +124,8 @@ proc exitPolicy(allowExit: bool) {.async.} =
   ).expect("send cover loop")
   checkUntilTimeout:
     cover.received == 1
-  echo "PASS: exit policy allowExit=", allowExit, "; cover loop received"
+  echo "PASS: default local/external exit delivery and cover loop received"
 
-suite "Exit role policy":
-  asyncTest "intermediates reject application exits but consume cover loops":
-    await exitPolicy(false)
-  asyncTest "opted-in nodes deliver locally and externally":
-    await exitPolicy(true)
+suite "Default exit delivery":
+  asyncTest "default nodes deliver locally and externally and consume cover loops":
+    await defaultExitDelivery()
