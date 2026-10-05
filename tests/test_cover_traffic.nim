@@ -230,6 +230,64 @@ suite "ConstantRateCoverTraffic":
     waitFor ct.emitCoverPacket()
     check ct.slotPool.coverClaimed == 1
 
+  asyncTest "failed async build cannot refund a new epoch's claim":
+    for prebuilt in [false, true]:
+      let ct =
+        ConstantRateCoverTraffic.new(totalSlots = 2, enablePrecomputation = prebuilt)
+      let gate = newAsyncEvent()
+      let building = newAsyncEvent()
+      let sentPackets = new seq[seq[byte]]
+      ct.setCoverPacketBuilder(
+        proc(
+            epoch: uint64
+        ): Future[Result[CoverPacketBuild, string]] {.
+            async: (raises: [CancelledError])
+        .} =
+          building.fire()
+          await gate.wait()
+          return err("build failed")
+      )
+      ct.setCoverPacketSender(mockSendCoverPacket(sentPackets))
+      ct.setProofTokenValidator(
+        proc(token: seq[byte]): bool {.gcsafe, raises: [].} =
+          false
+      )
+      ct.onEpochChange(1)
+      if prebuilt:
+        let (pid, ma) = makePeerInfo()
+        ct.slotPool.addPacket(
+          CoverPacket(firstHopPeerId: pid, firstHopAddr: ma, proofToken: @[1.byte])
+        )
+      let emission = ct.emitCoverPacket()
+      await building.wait()
+      ct.onEpochChange(2)
+      check ct.slotPool.claimSlotForCover()
+      gate.fire()
+      await emission
+      check ct.slotPool.coverClaimed == 1
+      check sentPackets[].len == 0
+
+  asyncTest "proof failure retains the claimed slot":
+    for prebuilt in [false, true]:
+      let ct =
+        ConstantRateCoverTraffic.new(totalSlots = 2, enablePrecomputation = prebuilt)
+      let sentPackets = new seq[seq[byte]]
+      ct.setCoverPacketBuilder(mockBuildCoverPacket())
+      ct.setCoverPacketSender(mockSendCoverPacket(sentPackets))
+      ct.setCoverProofGenerator(
+        proc(
+            packet: seq[byte], epoch: uint64
+        ): Future[Result[seq[byte], string]] {.async: (raises: [CancelledError]).} =
+          await sleepAsync(1.milliseconds)
+          return err("proof failed")
+      )
+      if prebuilt:
+        let (pid, ma) = makePeerInfo()
+        ct.slotPool.addPacket(CoverPacket(firstHopPeerId: pid, firstHopAddr: ma))
+      await ct.emitCoverPacket()
+      check ct.slotPool.coverClaimed == 1
+      check sentPackets[].len == 0
+
   asyncTest "pre-send delay is applied before emission":
     let sentPackets = new seq[seq[byte]]
     sentPackets[] = @[]
@@ -396,7 +454,7 @@ suite "CoverTraffic Pre-computation":
     ct.onEpochChange(2)
     check ct.slotPool.queuedCount == 0 # Stale packets cleared
 
-  test "stale prebuilt proof consumes only one slot":
+  test "stale prebuilt proof consumes one slot and samples one hold":
     ## Verify that when a prebuilt proof is stale, only ONE slot is consumed
     ## (the initial claimSlotForCover), not two.
     let sentPackets = new seq[seq[byte]]
@@ -410,6 +468,12 @@ suite "CoverTraffic Pre-computation":
     ct.setProofTokenValidator(
       proc(token: seq[byte]): bool {.gcsafe, raises: [].} =
         false # All proofs are stale
+    )
+    var holds = 0
+    ct.setSendDelaySampler(
+      proc(): Delay {.gcsafe, raises: [].} =
+        inc holds
+        Delay(1)
     )
     ct.onEpochChange(1)
 
@@ -425,6 +489,7 @@ suite "CoverTraffic Pre-computation":
 
     waitFor ct.emitCoverPacket()
     # Stale proof: should rebuild on-demand but consume only 1 slot
+    check holds == 1
     check ct.slotPool.coverClaimed == 1
     check sentPackets[].len == 1
     # The sent packet should be on-demand (PacketSize), not the prebuilt one
@@ -432,6 +497,7 @@ suite "CoverTraffic Pre-computation":
 
     # Second emission should still succeed (1 of 2 slots used)
     waitFor ct.emitCoverPacket()
+    check holds == 2
     check ct.slotPool.coverClaimed == 2
     check sentPackets[].len == 2
 
