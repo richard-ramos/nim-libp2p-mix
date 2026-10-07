@@ -410,23 +410,13 @@ method handleMixMessages*(
     let proofGenStartTime = Moment.now()
     let delayFut = sleepAsync(actualDelay.toDuration)
 
-    # proofGenTimeMs is captured at proof completion, inside the closure, so it
-    # measures proof cost alone — not max(proof, delay) as after allFutures.
-    var proofGenTimeMs: int64
-    let proofGenFut = (
-      proc(): Future[Result[tuple[packet: seq[byte], proofToken: seq[byte]], string]] {.
-          async: (raises: [CancelledError])
-      .} =
-        let res = await mixProto.generateAndAppendProof(
-          processedSP.serializedSphinxPacket, "Intermediate"
-        )
-        proofGenTimeMs = (Moment.now() - proofGenStartTime).milliseconds
-        return res
-    )()
-
     defer:
-      await cancelAndWait(proofGenFut, delayFut)
-    await allFutures(proofGenFut, delayFut)
+      await delayFut.cancelAndWait()
+    let proofResult = await mixProto.generateAndAppendProof(
+      processedSP.serializedSphinxPacket, "Intermediate"
+    )
+    let proofGenTimeMs = (Moment.now() - proofGenStartTime).milliseconds
+    await delayFut
 
     mixProto.spamProtection.withValue(sp):
       if proofGenTimeMs > actualDelay.int64:
@@ -435,7 +425,7 @@ method handleMixMessages*(
           sampledDelay = actualDelay,
           hint = "Increase the minimum delay floor or reduce proof generation time"
 
-    let (outgoingPacket, _) = (await proofGenFut).valueOr:
+    let (outgoingPacket, _) = proofResult.valueOr:
       error "Failed to generate spam protection proof for next hop", err = error
       return
 
@@ -663,21 +653,11 @@ proc sendPacket(
   let proofGenStartTime = Moment.now()
   let delayFut = sleepAsync(initialDelay.toDuration)
 
-  # proofGenTimeMs is captured at proof completion, inside the closure, so it
-  # measures proof cost alone — not max(proof, delay) as after allFutures.
-  var proofGenTimeMs: int64
-  let proofGenFut = (
-    proc(): Future[Result[tuple[packet: seq[byte], proofToken: seq[byte]], string]] {.
-        async: (raises: [CancelledError])
-    .} =
-      let res = await mixProto.generateAndAppendProof(serialized, label)
-      proofGenTimeMs = (Moment.now() - proofGenStartTime).milliseconds
-      return res
-  )()
-
   defer:
-    await cancelAndWait(proofGenFut, delayFut)
-  await allFutures(proofGenFut, delayFut)
+    await delayFut.cancelAndWait()
+  let proofResult = await mixProto.generateAndAppendProof(serialized, label)
+  let proofGenTimeMs = (Moment.now() - proofGenStartTime).milliseconds
+  await delayFut
 
   mixProto.spamProtection.withValue(sp):
     if proofGenTimeMs > initialDelay.int64:
@@ -686,7 +666,7 @@ proc sendPacket(
         sampledDelay = initialDelay,
         hint = "Increase the minimum delay floor or reduce proof generation time"
 
-  let (packetToSend, _) = (await proofGenFut).valueOr:
+  let (packetToSend, _) = proofResult.valueOr:
     return err(error)
 
   when defined(enable_mix_benchmarks):
